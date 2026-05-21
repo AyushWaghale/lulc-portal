@@ -5,17 +5,24 @@ require("dotenv").config();
 
 const app = express();
 
+// Normalize origins: strip trailing slashes
+const normalizeOrigin = (url) => url ? url.replace(/\/+$/, "") : url;
+
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  process.env.FRONTEND_URL, // Set this to your Vercel URL in Render env vars
+  "https://lulc-portal.vercel.app",           // hardcoded fallback
+  normalizeOrigin(process.env.FRONTEND_URL),   // from Render env var
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    // Normalize incoming origin too (strip trailing slash)
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
+    console.log("CORS blocked origin:", origin, "| Allowed:", allowedOrigins);
     return callback(new Error(`CORS policy: Origin ${origin} not allowed`));
   },
   credentials: true,
