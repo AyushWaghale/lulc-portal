@@ -80,26 +80,23 @@ router.post('/send-otp', async (req, res) => {
     }
 
     // 1a. Verify the email actually exists using deep-email-validator
-    // This performs regex, typo, disposable, MX, and SMTP checks directly from the server.
+    // This performs regex, typo, disposable, and MX checks directly from the server.
+    // NOTE: We disable SMTP validation (validateSMTP: false) because cloud providers (like Render, AWS)
+    // block outbound port 25, which causes valid emails to be incorrectly rejected.
     try {
       const validationRes = await emailValidator.validate({
         email: email,
-        sender: email, // some SMTP servers require a valid sender email
+        sender: email,
         validateRegex: true,
         validateMx: true,
         validateTypo: true,
         validateDisposable: true,
-        validateSMTP: true,
+        validateSMTP: false, // Disabled due to cloud host blocking
       });
 
       console.log(`Email validation result for ${email}:`, JSON.stringify(validationRes));
 
       if (!validationRes.valid) {
-        // If the failure is specifically SMTP, it means the mailbox does not exist
-        if (validationRes.reason === 'smtp') {
-          return res.status(400).json({ msg: 'This email address does not exist or is inactive. Please use a real email address.' });
-        }
-        
         if (validationRes.reason === 'mx') {
           return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
         }
