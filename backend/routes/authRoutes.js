@@ -51,11 +51,32 @@ const adminAuth = (req, res, next) => {
   }
 };
 
+// Common email domain typos → correct domain
+const DOMAIN_TYPOS = {
+  'gmaul.com': 'gmail.com', 'gmial.com': 'gmail.com', 'gmal.com': 'gmail.com',
+  'gamil.com': 'gmail.com', 'gmaill.com': 'gmail.com', 'gmali.com': 'gmail.com',
+  'gmail.co': 'gmail.com', 'gmail.con': 'gmail.com', 'gmail.cm': 'gmail.com',
+  'gmai.com': 'gmail.com', 'gnail.com': 'gmail.com', 'gmaol.com': 'gmail.com',
+  'yahooo.com': 'yahoo.com', 'yaho.com': 'yahoo.com', 'yhoo.com': 'yahoo.com',
+  'yahoo.co': 'yahoo.com', 'yahoo.con': 'yahoo.com',
+  'outlok.com': 'outlook.com', 'outloook.com': 'outlook.com', 'otlook.com': 'outlook.com',
+  'hotmial.com': 'hotmail.com', 'hotmil.com': 'hotmail.com', 'hotnail.com': 'hotmail.com',
+};
+
 // STEP 1 — Send OTP: verify email exists in real world, then send OTP
 router.post('/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ msg: 'Email is required.' });
+
+    // 0. Catch obvious domain typos immediately
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) return res.status(400).json({ msg: 'Invalid email address.' });
+    if (DOMAIN_TYPOS[domain]) {
+      return res.status(400).json({
+        msg: `Did you mean ${email.split('@')[0]}@${DOMAIN_TYPOS[domain]}? The domain "${domain}" looks like a typo.`
+      });
+    }
 
     // 1a. Verify the email actually exists using Abstract API
     //     abstractapi.com/api/email-validation  — free tier: 100 checks/month
