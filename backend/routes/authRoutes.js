@@ -142,38 +142,36 @@ router.post('/send-otp', async (req, res) => {
       { upsert: true, new: true }
     );
 
-    // Send OTP email
-    try {
-      await transporter.sendMail({
-        to: email,
-        subject: 'Verify your email — Maharashtra LULC Portal',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">🗺️ Maharashtra LULC Portal</h1>
-            </div>
-            <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
-              <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
-              <p style="color: #64748b; line-height: 1.6;">We received a request to create an account with this email. Enter the OTP below to confirm it's you.</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <div style="display: inline-block; background: #f1f5f9; border: 2px dashed #6366f1; border-radius: 12px; padding: 20px 40px;">
-                  <p style="margin: 0; font-size: 40px; font-weight: 900; letter-spacing: 12px; color: #4f46e5;">${otp}</p>
-                </div>
-              </div>
-              <p style="color: #94a3b8; font-size: 14px; text-align: center;">This OTP expires in <strong>10 minutes</strong>. If you didn't request this, ignore this email.</p>
-              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-              <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
-            </div>
+    // Send OTP email (async - don't await so frontend responds immediately)
+    transporter.sendMail({
+      to: email,
+      subject: 'Verify your email — Maharashtra LULC Portal',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">🗺️ Maharashtra LULC Portal</h1>
           </div>
-        `
-      });
+          <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
+            <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
+            <p style="color: #64748b; line-height: 1.6;">We received a request to create an account with this email. Enter the OTP below to confirm it's you.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <div style="display: inline-block; background: #f1f5f9; border: 2px dashed #6366f1; border-radius: 12px; padding: 20px 40px;">
+                <p style="margin: 0; font-size: 40px; font-weight: 900; letter-spacing: 12px; color: #4f46e5;">${otp}</p>
+              </div>
+            </div>
+            <p style="color: #94a3b8; font-size: 14px; text-align: center;">This OTP expires in <strong>10 minutes</strong>. If you didn't request this, ignore this email.</p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
+          </div>
+        </div>
+      `
+    }).then(() => {
       console.log(`OTP sent to ${email}: ${otp}`);
-    } catch (emailErr) {
+    }).catch(async (emailErr) => {
       console.error('Failed to send OTP email:', emailErr.message);
-      // Clean up the temp OTP
+      // Clean up the temp OTP in background if email failed to send
       await TempOTP.deleteOne({ email });
-      return res.status(500).json({ msg: 'Failed to send OTP email. Please check the email address and try again.' });
-    }
+    });
 
     res.json({ msg: 'OTP sent! Check your inbox.' });
   } catch (err) {
