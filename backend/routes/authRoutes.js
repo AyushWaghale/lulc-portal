@@ -6,6 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_123';
@@ -50,13 +51,26 @@ const adminAuth = (req, res, next) => {
   }
 };
 
-// STEP 1 — Send OTP to check email exists and is not already registered
+// STEP 1 — Send OTP: validate email domain exists, check not registered, then send OTP
 router.post('/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ msg: 'Email is required.' });
 
-    // Check if a verified account already exists
+    // 1a. Check email domain has valid MX records (i.e., the domain can receive emails)
+    const domain = email.split('@')[1];
+    if (!domain) return res.status(400).json({ msg: 'Invalid email address.' });
+
+    try {
+      const mxRecords = await dns.resolveMx(domain);
+      if (!mxRecords || mxRecords.length === 0) {
+        return res.status(400).json({ msg: `The email domain "${domain}" does not exist or cannot receive emails. Please use a valid email address.` });
+      }
+    } catch (dnsErr) {
+      return res.status(400).json({ msg: `The email domain "${domain}" does not exist. Please enter a valid email address.` });
+    }
+
+    // 1b. Check if already registered
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ msg: 'An account with this email already exists. Please log in.' });
