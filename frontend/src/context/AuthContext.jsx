@@ -46,24 +46,33 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (name, email, password) => {
+  const sendOtp = async (email) => {
     try {
-      const res = await axios.post(`${API}/register`, { name, email, password });
+      const res = await axios.post(`${API}/send-otp`, { email });
       return { success: true, msg: res.data.msg };
     } catch (err) {
-      toast.error(err.response?.data?.msg || 'Registration failed');
-      return { success: false, msg: err.response?.data?.msg || 'Registration failed' };
+      toast.error(err.response?.data?.msg || 'Failed to send OTP');
+      return { success: false, msg: err.response?.data?.msg || 'Failed to send OTP' };
     }
   };
 
   const verifyOtp = async (email, otp) => {
     try {
       const res = await axios.post(`${API}/verify-otp`, { email, otp });
-      toast.success('Email verified! You can now log in.');
-      return { success: true, msg: res.data.msg };
+      return { success: true, msg: res.data.msg, emailToken: res.data.emailToken };
     } catch (err) {
       toast.error(err.response?.data?.msg || 'OTP verification failed');
       return { success: false, msg: err.response?.data?.msg || 'OTP verification failed' };
+    }
+  };
+
+  const register = async (emailToken, name, password) => {
+    try {
+      const res = await axios.post(`${API}/register`, { emailToken, name, password });
+      return { success: true, msg: res.data.msg };
+    } catch (err) {
+      toast.error(err.response?.data?.msg || 'Registration failed');
+      return { success: false, msg: err.response?.data?.msg || 'Registration failed' };
     }
   };
 
@@ -128,7 +137,7 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{ 
       user, token, loading, 
       login, register, logout,
-      verifyOtp,
+      sendOtp, verifyOtp,
       forgotPassword, resetPassword,
       getProfile, updateProfile, changePassword
     }}>
