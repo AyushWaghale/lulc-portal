@@ -49,44 +49,128 @@ const adminAuth = (req, res, next) => {
   }
 };
 
-// Register User
+// Register User — saves as unverified, sends OTP
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    let user = await User.findOne({ email });
-    if (user) return res.status(400).json({ msg: 'User already exists' });
+
+    // Check if a verified user with this email already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser && existingUser.isVerified) {
+      return res.status(400).json({ msg: 'An account with this email already exists.' });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    user = new User({
-      name,
-      email,
-      password: hashedPassword,
-      role: 'user' // ALL new registrations are users
-    });
-
-    await user.save();
-
-    // Try sending real email if configured
-    if (EMAIL_USER !== 'your_email@gmail.com') {
-      try {
-        await transporter.sendMail({
-          to: email,
-          subject: 'Welcome to Maharashtra LULC Portal!',
-          html: `
-            <h2>Welcome ${name}!</h2>
-            <p>Your account has been successfully created. You can now log in to the GIS portal to view and analyze spatial datasets.</p>
-            <p>Thank you for joining us.</p>
-          `
-        });
-        console.log(`Welcome email sent to ${email}`);
-      } catch (err) {
-        console.error("Nodemailer failed:", err.message);
-      }
+    if (existingUser && !existingUser.isVerified) {
+      // Resend OTP to existing unverified account
+      existingUser.name = name;
+      existingUser.password = hashedPassword;
+      existingUser.verifyOTP = otp;
+      existingUser.verifyOTPExpiry = otpExpiry;
+      await existingUser.save();
+    } else {
+      // Create new unverified user
+      const user = new User({
+        name,
+        email,
+        password: hashedPassword,
+        role: 'user',
+        isVerified: false,
+        verifyOTP: otp,
+        verifyOTPExpiry: otpExpiry,
+      });
+      await user.save();
     }
 
-    res.json({ msg: 'Registration successful! You can now log in.' });
+    // Send OTP email
+    try {
+      await transporter.sendMail({
+        to: email,
+        subject: 'Verify your email — Maharashtra LULC Portal',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">🗺️ Maharashtra LULC Portal</h1>
+            </div>
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
+              <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
+              <p style="color: #64748b; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
+              <p style="color: #64748b; line-height: 1.6;">Use the OTP below to verify your email. It expires in <strong>10 minutes</strong>.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <div style="display: inline-block; background: #f1f5f9; border: 2px dashed #6366f1; border-radius: 12px; padding: 20px 40px;">
+                  <p style="margin: 0; font-size: 40px; font-weight: 900; letter-spacing: 12px; color: #4f46e5;">${otp}</p>
+                </div>
+              </div>
+              <p style="color: #94a3b8; font-size: 14px; text-align: center;">If you didn't request this, you can safely ignore this email.</p>
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+              <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
+            </div>
+          </div>
+        `
+      });
+      console.log(`OTP sent to ${email}: ${otp}`);
+    } catch (emailErr) {
+      console.error('Failed to send OTP email:', emailErr.message);
+      return res.status(500).json({ msg: 'Failed to send OTP email. Please try again.' });
+    }
+
+    res.json({ msg: 'OTP sent to your email. Please verify to complete registration.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+});
+
+// Verify OTP — complete registration
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ msg: 'No registration found for this email.' });
+    if (user.isVerified) return res.status(400).json({ msg: 'Email is already verified. Please log in.' });
+
+    if (!user.verifyOTP || user.verifyOTP !== otp) {
+      return res.status(400).json({ msg: 'Invalid OTP. Please check and try again.' });
+    }
+    if (new Date() > user.verifyOTPExpiry) {
+      return res.status(400).json({ msg: 'OTP has expired. Please register again to get a new OTP.' });
+    }
+
+    user.isVerified = true;
+    user.verifyOTP = null;
+    user.verifyOTPExpiry = null;
+    await user.save();
+
+    // Send welcome email
+    try {
+      await transporter.sendMail({
+        to: email,
+        subject: 'Welcome to Maharashtra LULC Portal! 🎉',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="color: white; margin: 0;">🗺️ Maharashtra LULC Portal</h1>
+            </div>
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
+              <h2 style="color: #1e293b;">You're verified! Welcome aboard 🎉</h2>
+              <p style="color: #64748b;">Hi <strong>${user.name}</strong>, your email has been verified successfully.</p>
+              <p style="color: #64748b;">You can now log in and explore the GIS portal.</p>
+            </div>
+          </div>
+        `
+      });
+    } catch (emailErr) {
+      console.error('Welcome email failed:', emailErr.message);
+    }
+
+    res.json({ msg: 'Email verified successfully! You can now log in.' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
@@ -101,13 +185,18 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) {
       console.log('User not found');
-      return res.status(400).json({ msg: 'Invalid credentials (user not found)' });
+      return res.status(400).json({ msg: 'Invalid credentials' });
+    }
+
+    // Block unverified users
+    if (!user.isVerified) {
+      return res.status(403).json({ msg: 'Please verify your email before logging in. Check your inbox for the OTP.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       console.log('Password mismatch');
-      return res.status(400).json({ msg: 'Invalid credentials (password mismatch)' });
+      return res.status(400).json({ msg: 'Invalid credentials' });
     }
 
     const payload = { user: { id: user.id, role: user.role, name: user.name } };
@@ -141,7 +230,8 @@ router.post('/forgot-password', async (req, res) => {
     await user.save();
 
     // Send reset email
-    const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
+    const FRONTEND = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const resetUrl = `${FRONTEND}/reset-password/${resetToken}`;
     
     try {
       await transporter.sendMail({

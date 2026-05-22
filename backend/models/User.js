@@ -14,6 +14,10 @@ const UserSchema = new mongoose.Schema({
   pincode: { type: String, default: '' },
   organization: { type: String, default: '' },
   profilePic: { type: String, default: '' }, // base64 or URL
+  // Email verification
+  isVerified: { type: Boolean, default: false },
+  verifyOTP: { type: String, default: null },
+  verifyOTPExpiry: { type: Date, default: null },
   // Password reset
   resetToken: { type: String, default: null },
   resetTokenExpiry: { type: Date, default: null }
