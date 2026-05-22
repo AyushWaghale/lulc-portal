@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const dns = require('dns').promises;
+const emailValidator = require('deep-email-validator');
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_123';
@@ -78,56 +79,45 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
-    // 1a. Verify the email actually exists using Abstract API
-    //     abstractapi.com/api/email-validation  — free tier: 100 checks/month
-    const EMAIL_VERIFY_KEY = process.env.EMAIL_VERIFY_KEY;
-    let apiCheckPassed = false;
+    // 1a. Verify the email actually exists using deep-email-validator
+    // This performs regex, typo, disposable, MX, and SMTP checks directly from the server.
+    try {
+      const validationRes = await emailValidator.validate({
+        email: email,
+        sender: email, // some SMTP servers require a valid sender email
+        validateRegex: true,
+        validateMx: true,
+        validateTypo: true,
+        validateDisposable: true,
+        validateSMTP: true,
+      });
 
-    if (EMAIL_VERIFY_KEY) {
-      try {
-        const apiUrl = `https://emailvalidation.abstractapi.com/v1/?api_key=${EMAIL_VERIFY_KEY}&email=${encodeURIComponent(email)}`;
-        const apiRes = await fetch(apiUrl);
-        const data = await apiRes.json();
+      console.log(`Email validation result for ${email}:`, JSON.stringify(validationRes));
 
-        // Log full response for debugging
-        console.log(`Email validation response for ${email}:`, JSON.stringify(data));
-
-        // If API returned an error (bad key, rate limit etc.), data.deliverability will be undefined
-        if (data.error) {
-          console.error('Abstract API error:', data.error);
-          // Fall through to DNS check below
-        } else if (data.deliverability !== undefined) {
-          apiCheckPassed = true;
-
-          // Block if definitely not deliverable
-          if (data.deliverability === 'UNDELIVERABLE') {
-            return res.status(400).json({
-              msg: 'This email address does not exist. Please enter a real, active email address.'
-            });
-          }
-
-          // Block if domain has no mail servers
-          if (data.is_mx_found?.value === false) {
-            return res.status(400).json({
-              msg: `The domain "${domain}" cannot receive emails. Please use a valid email address.`
-            });
-          }
-
-          // Block if SMTP check explicitly failed (mailbox rejected)
-          if (data.is_smtp_valid?.value === false) {
-            return res.status(400).json({
-              msg: 'This email address does not exist or cannot receive emails. Please use a valid email address.'
-            });
-          }
+      if (!validationRes.valid) {
+        // If the failure is specifically SMTP, it means the mailbox does not exist
+        if (validationRes.reason === 'smtp') {
+          return res.status(400).json({ msg: 'This email address does not exist or is inactive. Please use a real email address.' });
         }
-      } catch (apiErr) {
-        console.error('Email verification API request failed:', apiErr.message);
-        // Fall through to DNS check
-      }
-    }
+        
+        if (validationRes.reason === 'mx') {
+          return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
+        }
+        
+        if (validationRes.reason === 'typo') {
+           return res.status(400).json({ msg: `Did you mean ${validationRes.validators.typo.reason}?` });
+        }
 
-    // Fallback: DNS MX check (runs if no API key OR if API failed/returned no data)
-    if (!apiCheckPassed) {
+        if (validationRes.reason === 'disposable') {
+           return res.status(400).json({ msg: 'Disposable email addresses are not allowed.' });
+        }
+
+        // Catch-all for other validation failures
+        return res.status(400).json({ msg: 'Invalid email address provided.' });
+      }
+    } catch (err) {
+      console.error('Deep email validator error:', err);
+      // Fall through to basic DNS MX check if library fails entirely
       try {
         const mxRecords = await dns.resolveMx(domain);
         if (!mxRecords || mxRecords.length === 0) {
