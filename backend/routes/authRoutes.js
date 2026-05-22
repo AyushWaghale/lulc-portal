@@ -51,26 +51,60 @@ const adminAuth = (req, res, next) => {
   }
 };
 
-// STEP 1 — Send OTP: validate email domain exists, check not registered, then send OTP
+// STEP 1 — Send OTP: verify email exists in real world, then send OTP
 router.post('/send-otp', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ msg: 'Email is required.' });
 
-    // 1a. Check email domain has valid MX records (i.e., the domain can receive emails)
-    const domain = email.split('@')[1];
-    if (!domain) return res.status(400).json({ msg: 'Invalid email address.' });
+    // 1a. Verify the email actually exists using Abstract API
+    //     abstractapi.com/api/email-validation  — free tier: 100 checks/month
+    const EMAIL_VERIFY_KEY = process.env.EMAIL_VERIFY_KEY;
+    if (EMAIL_VERIFY_KEY) {
+      try {
+        const apiUrl = `https://emailvalidation.abstractapi.com/v1/?api_key=${EMAIL_VERIFY_KEY}&email=${encodeURIComponent(email)}`;
+        const apiRes = await fetch(apiUrl);
+        const data = await apiRes.json();
 
-    try {
-      const mxRecords = await dns.resolveMx(domain);
-      if (!mxRecords || mxRecords.length === 0) {
-        return res.status(400).json({ msg: `The email domain "${domain}" does not exist or cannot receive emails. Please use a valid email address.` });
+        console.log(`Email validation for ${email}:`, data.deliverability);
+
+        // UNDELIVERABLE = mailbox definitely does not exist
+        if (data.deliverability === 'UNDELIVERABLE') {
+          return res.status(400).json({
+            msg: 'This email address does not exist. Please enter a real, active email address.'
+          });
+        }
+
+        // Also block obviously invalid formats caught by Abstract
+        if (data.is_valid_format?.value === false) {
+          return res.status(400).json({ msg: 'Invalid email format.' });
+        }
+
+        // Also block if MX records are missing (domain doesn't accept email)
+        if (data.is_mx_found?.value === false) {
+          return res.status(400).json({
+            msg: `The domain "${email.split('@')[1]}" cannot receive emails. Please use a valid email address.`
+          });
+        }
+      } catch (apiErr) {
+        // If the verification API itself fails (network issue), fall through
+        // and still send OTP — we don't want to block real users due to API downtime
+        console.error('Email verification API failed:', apiErr.message);
       }
-    } catch (dnsErr) {
-      return res.status(400).json({ msg: `The email domain "${domain}" does not exist. Please enter a valid email address.` });
+    } else {
+      // Fallback: basic DNS MX check when API key is not configured
+      const domain = email.split('@')[1];
+      try {
+        const mxRecords = await dns.resolveMx(domain);
+        if (!mxRecords || mxRecords.length === 0) {
+          return res.status(400).json({ msg: `The email domain "${domain}" cannot receive emails.` });
+        }
+      } catch {
+        return res.status(400).json({ msg: `The email domain "${domain}" does not exist.` });
+      }
     }
 
-    // 1b. Check if already registered
+    // 1b. Check if already registered in our system
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ msg: 'An account with this email already exists. Please log in.' });
