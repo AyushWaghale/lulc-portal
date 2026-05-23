@@ -16,8 +16,8 @@ const UserSchema = new mongoose.Schema({
   profilePic: { type: String, default: '' }, // base64 or URL
   // Email verification
   isVerified: { type: Boolean, default: false },
-  verifyOTP: { type: String, default: null },
-  verifyOTPExpiry: { type: Date, default: null },
+  verifyToken: { type: String, default: null },
+  verifyTokenExpiry: { type: Date, default: null },
   // Password reset
   resetToken: { type: String, default: null },
   resetTokenExpiry: { type: Date, default: null }

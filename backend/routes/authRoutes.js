@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const TempOTP = require('../models/TempOTP');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
@@ -64,13 +63,12 @@ const DOMAIN_TYPOS = {
   'hotmial.com': 'hotmail.com', 'hotmil.com': 'hotmail.com', 'hotnail.com': 'hotmail.com',
 };
 
-// STEP 1 — Send OTP: verify email exists in real world, then send OTP
-router.post('/send-otp', async (req, res) => {
+// Register new user and send verification link
+router.post('/register', async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ msg: 'Email is required.' });
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) return res.status(400).json({ msg: 'Please enter all fields.' });
 
-    // 0. Catch obvious domain typos immediately
     const domain = email.split('@')[1]?.toLowerCase();
     if (!domain) return res.status(400).json({ msg: 'Invalid email address.' });
     if (DOMAIN_TYPOS[domain]) {
@@ -79,10 +77,7 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
-    // 1a. Verify the email actually exists using deep-email-validator
-    // This performs regex, typo, disposable, and MX checks directly from the server.
-    // NOTE: We disable SMTP validation (validateSMTP: false) because cloud providers (like Render, AWS)
-    // block outbound port 25, which causes valid emails to be incorrectly rejected.
+    // Email validation
     try {
       const validationRes = await emailValidator.validate({
         email: email,
@@ -91,58 +86,53 @@ router.post('/send-otp', async (req, res) => {
         validateMx: true,
         validateTypo: true,
         validateDisposable: true,
-        validateSMTP: false, // Disabled due to cloud host blocking
+        validateSMTP: false,
       });
 
-      console.log(`Email validation result for ${email}:`, JSON.stringify(validationRes));
-
       if (!validationRes.valid) {
-        if (validationRes.reason === 'mx') {
-          return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
-        }
-        
-        if (validationRes.reason === 'typo') {
-           return res.status(400).json({ msg: `Did you mean ${validationRes.validators.typo.reason}?` });
-        }
-
-        if (validationRes.reason === 'disposable') {
-           return res.status(400).json({ msg: 'Disposable email addresses are not allowed.' });
-        }
-
-        // Catch-all for other validation failures
+        if (validationRes.reason === 'mx') return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
+        if (validationRes.reason === 'typo') return res.status(400).json({ msg: `Did you mean ${validationRes.validators.typo.reason}?` });
+        if (validationRes.reason === 'disposable') return res.status(400).json({ msg: 'Disposable email addresses are not allowed.' });
         return res.status(400).json({ msg: 'Invalid email address provided.' });
       }
     } catch (err) {
-      console.error('Deep email validator error:', err);
-      // Fall through to basic DNS MX check if library fails entirely
+      // Fallback
       try {
         const mxRecords = await dns.resolveMx(domain);
-        if (!mxRecords || mxRecords.length === 0) {
-          return res.status(400).json({ msg: `The email domain "${domain}" cannot receive emails.` });
-        }
+        if (!mxRecords || mxRecords.length === 0) return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
       } catch {
-        return res.status(400).json({ msg: `The email domain "${domain}" does not exist. Please enter a valid email address.` });
+        return res.status(400).json({ msg: `The domain "${domain}" does not exist.` });
       }
     }
 
-    // 1b. Check if already registered in our system
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ msg: 'An account with this email already exists. Please log in.' });
+    let user = await User.findOne({ email });
+    if (user) {
+      if (user.isVerified) {
+        return res.status(400).json({ msg: 'An account with this email already exists. Please log in.' });
+      } else {
+        // If unverified, we can reuse the record and update details
+        user.name = name;
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
+      }
+    } else {
+      user = new User({ name, email, password });
+      const salt = await bcrypt.genSalt(10);
+      user.password = await bcrypt.hash(password, salt);
     }
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    // Generate Verification Token
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    user.verifyToken = verifyToken;
+    user.verifyTokenExpiry = Date.now() + 3600000; // 1 hour
+    user.isVerified = false;
 
-    // Upsert TempOTP record
-    await TempOTP.findOneAndUpdate(
-      { email },
-      { otp, expiresAt },
-      { upsert: true, new: true }
-    );
+    await user.save();
 
-    // Send OTP email (async - don't await so frontend responds immediately)
+    // Send verification email asynchronously
+    const FRONTEND = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const verifyUrl = `${FRONTEND}/verify-email?token=${verifyToken}`;
+
     transporter.sendMail({
       to: email,
       subject: 'Verify your email — Maharashtra LULC Portal',
@@ -153,115 +143,47 @@ router.post('/send-otp', async (req, res) => {
           </div>
           <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
             <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
-            <p style="color: #64748b; line-height: 1.6;">We received a request to create an account with this email. Enter the OTP below to confirm it's you.</p>
+            <p style="color: #64748b; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
+            <p style="color: #64748b; line-height: 1.6;">Please verify your email address to complete your registration by clicking the button below:</p>
             <div style="text-align: center; margin: 30px 0;">
-              <div style="display: inline-block; background: #f1f5f9; border: 2px dashed #6366f1; border-radius: 12px; padding: 20px 40px;">
-                <p style="margin: 0; font-size: 40px; font-weight: 900; letter-spacing: 12px; color: #4f46e5;">${otp}</p>
-              </div>
+              <a href="${verifyUrl}" style="background: #4f46e5; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Verify Email</a>
             </div>
-            <p style="color: #94a3b8; font-size: 14px; text-align: center;">This OTP expires in <strong>10 minutes</strong>. If you didn't request this, ignore this email.</p>
+            <p style="color: #94a3b8; font-size: 14px; text-align: center;">This link expires in <strong>1 hour</strong>.</p>
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
             <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
           </div>
         </div>
       `
-    }).then(() => {
-      console.log(`OTP sent to ${email}: ${otp}`);
-    }).catch(async (emailErr) => {
-      console.error('Failed to send OTP email:', emailErr.message);
-      // Clean up the temp OTP in background if email failed to send
-      await TempOTP.deleteOne({ email });
-    });
+    }).catch(err => console.error('Failed to send verify email:', err));
 
-    res.json({ msg: 'OTP sent! Check your inbox.' });
+    res.json({ msg: 'Registration successful! Please check your email for the verification link.' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
   }
 });
 
-// STEP 2 — Verify OTP, return a short-lived emailToken proving ownership
-router.post('/verify-otp', async (req, res) => {
+// Verify Email Link
+router.post('/verify-email', async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ msg: 'Verification token is required.' });
 
-    const tempRecord = await TempOTP.findOne({ email });
-    if (!tempRecord) {
-      return res.status(400).json({ msg: 'No OTP found for this email. Please request a new one.' });
-    }
-    if (tempRecord.otp !== otp) {
-      return res.status(400).json({ msg: 'Invalid OTP. Please check and try again.' });
-    }
-    if (new Date() > tempRecord.expiresAt) {
-      await TempOTP.deleteOne({ email });
-      return res.status(400).json({ msg: 'OTP has expired. Please request a new one.' });
-    }
-
-    // OTP is valid — delete it and return a signed proof token (30 min)
-    await TempOTP.deleteOne({ email });
-    const emailToken = jwt.sign({ verifiedEmail: email }, JWT_SECRET, { expiresIn: '30m' });
-
-    res.json({ msg: 'Email verified! Please complete your registration.', emailToken });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Server Error');
-  }
-});
-
-// STEP 3 — Complete registration using the emailToken + name + password
-router.post('/register', async (req, res) => {
-  try {
-    const { emailToken, name, password } = req.body;
-
-    // Decode and validate the emailToken issued after OTP verification
-    let verifiedEmail;
-    try {
-      const decoded = jwt.verify(emailToken, JWT_SECRET);
-      verifiedEmail = decoded.verifiedEmail;
-    } catch (err) {
-      return res.status(400).json({ msg: 'Email verification expired or invalid. Please start over.' });
-    }
-
-    // Double-check no account was created in the meantime
-    const existingUser = await User.findOne({ email: verifiedEmail });
-    if (existingUser) {
-      return res.status(400).json({ msg: 'An account with this email already exists. Please log in.' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    const user = new User({
-      name,
-      email: verifiedEmail,
-      password: hashedPassword,
-      role: 'user',
-      isVerified: true, // Already verified via OTP
+    const user = await User.findOne({
+      verifyToken: token,
+      verifyTokenExpiry: { $gt: Date.now() }
     });
+
+    if (!user) {
+      return res.status(400).json({ msg: 'Invalid or expired verification link. Please register again.' });
+    }
+
+    user.isVerified = true;
+    user.verifyToken = null;
+    user.verifyTokenExpiry = null;
     await user.save();
 
-    // Send welcome email
-    try {
-      await transporter.sendMail({
-        to: verifiedEmail,
-        subject: 'Welcome to Maharashtra LULC Portal! 🎉',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-              <h1 style="color: white; margin: 0;">🗺️ Maharashtra LULC Portal</h1>
-            </div>
-            <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
-              <h2 style="color: #1e293b;">Welcome aboard, ${name}! 🎉</h2>
-              <p style="color: #64748b;">Your account has been created and your email verified. You can now log in and explore the GIS portal.</p>
-            </div>
-          </div>
-        `
-      });
-    } catch (emailErr) {
-      console.error('Welcome email failed:', emailErr.message);
-    }
-
-    res.json({ msg: 'Registration successful! You can now log in.' });
+    res.json({ msg: 'Email successfully verified! You can now log in.' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
@@ -281,7 +203,7 @@ router.post('/login', async (req, res) => {
 
     // Block unverified users
     if (!user.isVerified) {
-      return res.status(403).json({ msg: 'Please verify your email before logging in. Check your inbox for the OTP.' });
+      return res.status(403).json({ msg: 'Please verify your email before logging in. Check your inbox for the verification link.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);

@@ -670,6 +670,16 @@ function MapPortal() {
             {layersData.roads && <LayersControl.Overlay checked name="4. Roads"><GeoJSON data={layersData.roads} style={getStyle('road')} onEachFeature={onEachFeature} /></LayersControl.Overlay>}
             {layersData.lulc && <LayersControl.Overlay checked name="5. LULC Polygons"><GeoJSON data={layersData.lulc} style={getStyle('lulc')} onEachFeature={onEachFeature} /></LayersControl.Overlay>}
           </LayersControl>
+
+          {/* Highlight Layer for Selected Feature */}
+          {selectedFeature && (
+            <GeoJSON 
+              key={`highlight-${selectedFeature.properties.OBJECTID || JSON.stringify(selectedFeature.geometry)}`}
+              data={selectedFeature}
+              style={{ weight: 5, color: '#f59e0b', fillColor: '#fcd34d', fillOpacity: 0.4 }}
+              interactive={false}
+            />
+          )}
         </MapContainer>
       </main>
     </div>

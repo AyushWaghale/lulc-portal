@@ -46,33 +46,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const sendOtp = async (email) => {
+  const register = async (name, email, password) => {
     try {
-      const res = await axios.post(`${API}/send-otp`, { email });
-      return { success: true, msg: res.data.msg };
-    } catch (err) {
-      toast.error(err.response?.data?.msg || 'Failed to send OTP');
-      return { success: false, msg: err.response?.data?.msg || 'Failed to send OTP' };
-    }
-  };
-
-  const verifyOtp = async (email, otp) => {
-    try {
-      const res = await axios.post(`${API}/verify-otp`, { email, otp });
-      return { success: true, msg: res.data.msg, emailToken: res.data.emailToken };
-    } catch (err) {
-      toast.error(err.response?.data?.msg || 'OTP verification failed');
-      return { success: false, msg: err.response?.data?.msg || 'OTP verification failed' };
-    }
-  };
-
-  const register = async (emailToken, name, password) => {
-    try {
-      const res = await axios.post(`${API}/register`, { emailToken, name, password });
+      const res = await axios.post(`${API}/register`, { name, email, password });
       return { success: true, msg: res.data.msg };
     } catch (err) {
       toast.error(err.response?.data?.msg || 'Registration failed');
       return { success: false, msg: err.response?.data?.msg || 'Registration failed' };
+    }
+  };
+
+  const verifyEmail = async (token) => {
+    try {
+      const res = await axios.post(`${API}/verify-email`, { token });
+      return { success: true, msg: res.data.msg };
+    } catch (err) {
+      return { success: false, msg: err.response?.data?.msg || 'Email verification failed' };
     }
   };
 
@@ -136,8 +125,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{ 
       user, token, loading, 
-      login, register, logout,
-      sendOtp, verifyOtp,
+      login, register, logout, verifyEmail,
       forgotPassword, resetPassword,
       getProfile, updateProfile, changePassword
     }}>
