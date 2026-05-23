@@ -133,30 +133,34 @@ router.post('/register', async (req, res) => {
     const FRONTEND = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
     const verifyUrl = `${FRONTEND}/verify-email?token=${verifyToken}`;
 
-    transporter.sendMail({
-      to: email,
-      subject: 'Verify your email — Maharashtra LULC Portal',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">🗺️ Maharashtra LULC Portal</h1>
-          </div>
-          <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
-            <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
-            <p style="color: #64748b; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
-            <p style="color: #64748b; line-height: 1.6;">Please verify your email address to complete your registration by clicking the button below:</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${verifyUrl}" style="background: #4f46e5; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Verify Email</a>
+    try {
+      await transporter.sendMail({
+        to: email,
+        subject: 'Verify your email — Maharashtra LULC Portal',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">🗺️ Maharashtra LULC Portal</h1>
             </div>
-            <p style="color: #94a3b8; font-size: 14px; text-align: center;">This link expires in <strong>1 hour</strong>.</p>
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-            <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
+              <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
+              <p style="color: #64748b; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
+              <p style="color: #64748b; line-height: 1.6;">Please verify your email address to complete your registration by clicking the button below:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${verifyUrl}" style="background: #4f46e5; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Verify Email</a>
+              </div>
+              <p style="color: #94a3b8; font-size: 14px; text-align: center;">This link expires in <strong>1 hour</strong>.</p>
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+              <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
+            </div>
           </div>
-        </div>
-      `
-    }).catch(err => console.error('Failed to send verify email:', err));
-
-    res.json({ msg: 'Registration successful! Please check your email for the verification link.' });
+        `
+      });
+      res.json({ msg: 'Registration successful! Please check your email for the verification link.' });
+    } catch (err) {
+      console.error('Failed to send verify email:', err);
+      return res.status(500).json({ msg: 'Could not send verification email. Please try again.' });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
