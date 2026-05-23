@@ -5,8 +5,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
-const dns = require('dns').promises;
-const emailValidator = require('deep-email-validator');
 
 // Environment variables
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_123';
@@ -77,32 +75,10 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Email validation
-    try {
-      const validationRes = await emailValidator.validate({
-        email: email,
-        sender: email,
-        validateRegex: true,
-        validateMx: true,
-        validateTypo: true,
-        validateDisposable: true,
-        validateSMTP: false,
-      });
-
-      if (!validationRes.valid) {
-        if (validationRes.reason === 'mx') return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
-        if (validationRes.reason === 'typo') return res.status(400).json({ msg: `Did you mean ${validationRes.validators.typo.reason}?` });
-        if (validationRes.reason === 'disposable') return res.status(400).json({ msg: 'Disposable email addresses are not allowed.' });
-        return res.status(400).json({ msg: 'Invalid email address provided.' });
-      }
-    } catch (err) {
-      // Fallback
-      try {
-        const mxRecords = await dns.resolveMx(domain);
-        if (!mxRecords || mxRecords.length === 0) return res.status(400).json({ msg: `The domain "${domain}" cannot receive emails.` });
-      } catch {
-        return res.status(400).json({ msg: `The domain "${domain}" does not exist.` });
-      }
+    // Basic Regex Validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ msg: 'Invalid email address format.' });
     }
 
     let user = await User.findOne({ email });
@@ -159,11 +135,11 @@ router.post('/register', async (req, res) => {
       res.json({ msg: 'Registration successful! Please check your email for the verification link.' });
     } catch (err) {
       console.error('Failed to send verify email:', err);
-      return res.status(500).json({ msg: 'Could not send verification email. Please try again.' });
+      return res.status(500).json({ msg: 'Server failed to send email. Check EMAIL_USER and EMAIL_PASS configuration.' });
     }
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Server Error');
+    console.error('Register Error:', err);
+    res.status(500).json({ msg: 'Server Error during registration.' });
   }
 });
 
