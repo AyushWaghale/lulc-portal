@@ -1,7 +1,7 @@
 import React, { useState, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import { Link } from 'react-router-dom';
-import { MapPin, Mail, UserPlus, ShieldCheck } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { MapPin, UserPlus, ShieldCheck } from 'lucide-react';
 
 const Register = () => {
   const [email, setEmail] = useState('');
@@ -9,9 +9,9 @@ const Register = () => {
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState({ text: '', type: '' });
   const [loading, setLoading] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
 
   const { register } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -22,8 +22,8 @@ const Register = () => {
     setLoading(false);
     
     if (res.success) {
-      setMsg({ text: '', type: '' });
-      setIsSuccess(true);
+      setMsg({ text: res.msg, type: 'info' });
+      setTimeout(() => navigate('/login'), 2000);
     } else {
       setMsg({ text: res.msg, type: 'error' });
     }
@@ -33,30 +33,6 @@ const Register = () => {
     ? 'bg-red-50 text-red-600 border-red-100'
     : 'bg-blue-50 text-blue-600 border-blue-100';
 
-  if (isSuccess) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
-        <div className="sm:mx-auto sm:w-full sm:max-w-md">
-          <div className="bg-white py-12 px-4 shadow-xl border border-slate-100 sm:rounded-xl sm:px-10 text-center">
-            <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-6">
-              <Mail className="h-8 w-8 text-green-600" />
-            </div>
-            <h2 className="text-2xl font-extrabold text-slate-900 mb-2">Check your email</h2>
-            <p className="text-sm text-slate-600 mb-6">
-              We sent a verification link to <span className="font-bold text-slate-800">{email}</span>. 
-              Please click the link in the email to verify your account.
-            </p>
-            <Link 
-              to="/login"
-              className="inline-flex justify-center items-center gap-2 py-2.5 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
-            >
-              Back to Login
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">

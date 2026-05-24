@@ -97,78 +97,39 @@ router.post('/register', async (req, res) => {
       user.password = await bcrypt.hash(password, salt);
     }
 
-    // Generate Verification Token
-    const verifyToken = crypto.randomBytes(32).toString('hex');
-    user.verifyToken = verifyToken;
-    user.verifyTokenExpiry = Date.now() + 3600000; // 1 hour
-    user.isVerified = false;
-
+    user.isVerified = true;
     await user.save();
 
-    // Send verification email asynchronously
-    const FRONTEND = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-    const verifyUrl = `${FRONTEND}/verify-email?token=${verifyToken}`;
-
+    // Send Welcome Email
     try {
       await transporter.sendMail({
         to: email,
-        subject: 'Verify your email — Maharashtra LULC Portal',
+        subject: 'Welcome to Maharashtra LULC Portal! 🎉',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0; font-size: 24px;">🗺️ Maharashtra LULC Portal</h1>
             </div>
             <div style="background: #ffffff; padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
-              <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
-              <p style="color: #64748b; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
-              <p style="color: #64748b; line-height: 1.6;">Please verify your email address to complete your registration by clicking the button below:</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${verifyUrl}" style="background: #4f46e5; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Verify Email</a>
-              </div>
-              <p style="color: #94a3b8; font-size: 14px; text-align: center;">This link expires in <strong>1 hour</strong>.</p>
+              <h2 style="color: #1e293b; margin-top: 0;">Welcome aboard, ${name}!</h2>
+              <p style="color: #64748b; line-height: 1.6;">Your account has been successfully created. You can now log in and explore the GIS portal.</p>
               <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
               <p style="color: #94a3b8; font-size: 12px; text-align: center;">Maharashtra LULC GIS Portal &copy; 2026</p>
             </div>
           </div>
         `
       });
-      res.json({ msg: 'Registration successful! Please check your email for the verification link.' });
     } catch (err) {
-      console.error('Failed to send verify email:', err);
-      return res.status(500).json({ msg: 'Server failed to send email. Check EMAIL_USER and EMAIL_PASS configuration.' });
+      console.error('Failed to send welcome email:', err);
     }
+
+    res.json({ msg: 'Registration successful! You can now log in.' });
   } catch (err) {
     console.error('Register Error:', err);
     res.status(500).json({ msg: 'Server Error during registration.' });
   }
 });
 
-// Verify Email Link
-router.post('/verify-email', async (req, res) => {
-  try {
-    const { token } = req.body;
-    if (!token) return res.status(400).json({ msg: 'Verification token is required.' });
-
-    const user = await User.findOne({
-      verifyToken: token,
-      verifyTokenExpiry: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({ msg: 'Invalid or expired verification link. Please register again.' });
-    }
-
-    user.isVerified = true;
-    user.verifyToken = null;
-    user.verifyTokenExpiry = null;
-    await user.save();
-
-    res.json({ msg: 'Email successfully verified! You can now log in.' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Server Error');
-  }
-});
 
 // Login User
 router.post('/login', async (req, res) => {
@@ -181,11 +142,6 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ msg: 'Invalid credentials' });
     }
 
-    // Block unverified users
-    if (!user.isVerified) {
-      return res.status(403).json({ msg: 'Please verify your email before logging in. Check your inbox for the verification link.' });
-    }
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       console.log('Password mismatch');
@@ -193,11 +149,26 @@ router.post('/login', async (req, res) => {
     }
 
     const payload = { user: { id: user.id, role: user.role, name: user.name } };
-    jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
-      if (err) throw err;
-      console.log('Login successful');
-      res.json({ token, user: payload.user });
-    });
+    
+    // Generate token
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' });
+
+    // Send login notification email asynchronously (do not block login)
+    transporter.sendMail({
+      to: email,
+      subject: 'New Login Alert — Maharashtra LULC Portal',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #1e293b;">New Login Detected</h2>
+          <p style="color: #64748b;">Hi <strong>${user.name}</strong>,</p>
+          <p style="color: #64748b;">We noticed a new login to your Maharashtra LULC Portal account on ${new Date().toLocaleString()}.</p>
+          <p style="color: #64748b;">If this was you, you can safely ignore this email. If not, please change your password immediately.</p>
+        </div>
+      `
+    }).catch(err => console.error('Failed to send login alert:', err));
+
+    console.log('Login successful');
+    res.json({ token, user: payload.user });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).send('Server Error');

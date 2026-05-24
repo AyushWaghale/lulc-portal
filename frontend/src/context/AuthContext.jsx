@@ -56,14 +56,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const verifyEmail = async (token) => {
-    try {
-      const res = await axios.post(`${API}/verify-email`, { token });
-      return { success: true, msg: res.data.msg };
-    } catch (err) {
-      return { success: false, msg: err.response?.data?.msg || 'Email verification failed' };
-    }
-  };
+
 
   const forgotPassword = async (email) => {
     try {
@@ -125,7 +118,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{ 
       user, token, loading, 
-      login, register, logout, verifyEmail,
+      login, register, logout,
       forgotPassword, resetPassword,
       getProfile, updateProfile, changePassword
     }}>
